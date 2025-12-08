@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            background-color: #181123;
+            min-width:460px;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start; /* 改为左对齐 */
+            padding: 1em;
+        }
+
+        .gradient-text {
+            background-image: linear-gradient(90deg, rgba(0, 255, 113, 1) 0%, rgba(0, 190, 140, 1) 21%, rgba(3, 150, 170, 1) 51%, rgba(6, 84, 170, 1) 100%);
+            background-size: 100%;
+            background-repeat: repeat;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        h1 {
+            font-family: "Archivo Black", sans-serif;
+            font-size: 2.5em;
+            text-align: left; /* 标题左对齐 */
+            margin: 0;
+            margin-bottom: 0.5em;
+            color: white;
+        }
+
+        button {
+            border: none;
+            cursor: pointer;
+            margin-bottom: 1em;
+            padding: 2.5%;
+            width: 20em;
+            border-radius: 8px;
+        }
+
+        .groupName {
+            margin-bottom: 0.7em;
+            color: white;
+            font-size: 1.5em;
+        }
+
+        .inputLabel {
+            color: white;
+        }
+
+        #saveMeta {
+            margin-bottom: 1em;
+        }
+
+        #content {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start; /* 内容左对齐 */
+            width: 100%;
+        }
+
+        .contact a {
+            color: #ffffff;
+        }
+
+        .contact {
+            text-align: left; /* 联系信息左对齐 */
+            margin: 5px 0;
+            color: white;
+        }
+        .contact-container {
+            display: flex;
+            justify-content: flex-start; /* 左对齐 */
+            flex-wrap: wrap; /* 允许换行 */
+            gap: 1em; /* 设置间距 */
+        }
+        #toggleGroup {
+            display: flex;
+            justify-content: flex-start; /* 选择类型左对齐 */
+            margin-bottom: 1em;
+        }
+
+        #toggleGroup label {
+            color: white;
+            margin-right: 1em;
+            cursor: pointer;
+        }
+
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start; /* 单选按钮组左对齐 */
+            margin-bottom: 1em;
+        }
+
+        .radio-group label {
+            color: white;
+            margin-bottom: 0.5em;
+            cursor: pointer;
+        }
+
+        .radio-group input[type="radio"] {
+            margin-right: 0.5em;
+        }
+        #notification {
+            display: none; /* 初始状态为隐藏 */
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 1em;
+            border-radius: 8px;
+            position: fixed;
+            top: 61%;
+            left: 50%;
+            text-align: center; /* Center text horizontally */
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+        #inputText {
+            padding: 4%;
+            border-radius: 8px;
+            width: 20em;
+        }
+        #execute {
+            margin-top: 1em;
+            margin-bottom: 3em;
+            width: 100%;
+            height: 3em;
+        }
+        #textGroup {
+            display: none; /* 默认隐藏 */
+        }
+    </style>
+</head>
+<body>
+    <div id="content">
+        <h1 class="gradient-text">MagicScript</h1>
+        <div id="notification">The script starts executing.<br>Please wait until the content on the page begins to change.</div> <!-- 提示消息容器 -->
+
+        <div class="groupName">Platform</div>
+        <div id="toggleGroup">
+            <label>
+                <input type="radio" name="platformType" value="iOS" checked>
+                iOS
+            </label>
+            <label>
+                <input type="radio" name="platformType" value="macOS">
+                macOS
+            </label>
+            <label>
+                <input type="radio" name="platformType" value="tvOS">
+                tvOS
+            </label>
+            <label>
+                <input type="radio" name="platformType" value="visionOS">
+                visionOS
+            </label>
+        </div>
+
+        <div class="groupName">Position</div>
+        <div id="toggleGroup">
+            <label>
+                <input type="radio" name="type" value="whatsNew" checked>
+                What's New
+            </label>
+            <label>
+                <input type="radio" name="type" value="promotionalText">
+                Promotional Text
+            </label>
+        </div>
+
+
+
+        <div class="groupName">Copy and paste</div>
+        <div class="radio-group">
+            <label>
+                <input type="radio" name="copyOption" value="copy_latest" checked>
+                from the previous version to the latest version
+            </label>
+            <label>
+                <input type="radio" name="copyOption" value="copy_primary">
+                from the primary language to all other languages
+            </label>
+            <label>
+                <input type="radio" name="copyOption" value="copy_primary_translation">
+                from one language to all other languages with translation
+            </label>
+        </div>
+
+        <div class="groupName" id="textGroup">
+            <div>Text</div>
+            <div class="radio-group">
+                <input type="text" id="inputText" name="inputText" placeholder="Enter your text here">
+            </div>
+        </div>
+        <button id="execute">Execute</button>
+
+        <!-- <div class="groupName">History</div>
+        <div id="saveMeta">
+            <input type="checkbox" id="saveMetaData" name="saveMetaData">
+            <label class="inputLabel" for="saveMetaData">Save the latest version of metadata before submitting automatically</label><br>
+        </div>
+        <button id="history">View history of metadata</button> -->
+
+        <div class="contact-container">
+            <div class="contact"><a href='https://x.com/masoncaiws' target='_blank'>Twitter: masoncaiws</a></div>
+            <div class="contact">|</div>
+            <div class="contact">WeChat: caiwenshuo</div>
+            <div class="contact">|</div>
+            <div class="contact">Email: cswenshuo@gmail.com</div>
+            <div class="contact">If you think MagicScript helps you, please rate us in <a href='https://chromewebstore.google.com/detail/magicscript-app-store-con/dibilpekhfnlccjpcgkkancjamoeljcp' target='_blank'>Chrome Web Store</a></div>
+        </div>
+    </div>
+</body>
+<script src="scripts/popup.js"></script>
+</html>
