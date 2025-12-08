@@ -6,6 +6,12 @@ This project is fully open source and hosted on GitHub:
 
 - Repository: <https://github.com/caiwenshuo/MagicScript-Public>
 
+You can also install MagicScript directly from the Chrome Web Store:
+
+- Chrome Web Store: <https://chromewebstore.google.com/detail/magicscript-app-store-con/dibilpekhfnlccjpcgkkancjamoeljcp/reviews?hl=en-US&utm_source=reddit>
+
+If MagicScript is helpful to you, please consider leaving a positive review and rating in the Chrome Web Store.
+
 You are very welcome to:
 
 - Open issues to report bugs or request new features  
