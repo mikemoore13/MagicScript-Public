@@ -25,4 +25,7 @@ MagicScript is still in an early stage. Planned directions include (but are not 
    - Explore and implement support for Safari based on the existing Chrome extension  
    - Keep the experience and feature set as consistent as possible across browsers  
 
+3. **History tracking**  
+   - Automatically keep a history of each release’s description, What’s New, and keywords  
+
 If you are interested in any of these directions or have new ideas, feel free to start a discussion or contribute directly on GitHub.
