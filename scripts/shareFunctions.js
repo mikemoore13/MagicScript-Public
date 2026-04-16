@@ -1,64 +1,146 @@
-// 说明：pageCheck 负责在 App Store Connect 的分发页面上定位指定平台下的版本列表，
-// 并根据 directToInflight 参数决定是跳转到 inflight 还是 deliverable。
-function pageCheck(end, directToInflight = false) {
-  // App Store Connect 左侧平台列表容器（iOS / macOS / tvOS 等）
-  const platforms = document.querySelector('[class="Box-sc-18eybku-0 bHeRUM"]');
-  let ul;
+function normalizePlatformText(text) {
+  return (text || "").replace(/\s+/g, "").toLowerCase();
+}
 
-  console.log("[MagicScript][pageCheck] target platform:", end);
+function getExpectedPlatformTokens(end, url) {
+  const tokens = new Set();
+  const normalizedEnd = normalizePlatformText(end);
 
-  const url = window.location.toString();
-
-  console.log("[MagicScript][pageCheck] current url:", url);
-  // 如果不在 distribution 页面，则提醒用户先切到正确页面
-  if (!platforms || url.indexOf("distribution") === -1) {
-    window.alert(
-      "Go the page in App Store Connect where you can edit your app's description first. \n\nThe URL will be like https://appstoreconnect.apple.com/apps/yourAppid/distribution/ios/version/inflight"
-    );
-    return { success: false, ul: ul };
+  if (normalizedEnd.indexOf("ios") > -1 || normalizedEnd.indexOf("iphone") > -1 || normalizedEnd.indexOf("ipad") > -1) {
+    tokens.add("ios");
+  }
+  if (normalizedEnd.indexOf("mac") > -1) {
+    tokens.add("macos");
+  }
+  if (normalizedEnd.indexOf("tv") > -1) {
+    tokens.add("tvos");
+  }
+  if (normalizedEnd.indexOf("vision") > -1) {
+    tokens.add("visionos");
   }
 
-  let seletedPlatformExist = false;
-  for (let platform of platforms.children) {
-    console.log("[MagicScript][pageCheck] platform node:", platform);
+  const urlMatch = (url || "").match(/\/distribution\/([^\/]+)\/version\//i);
+  if (urlMatch && urlMatch[1]) {
+    tokens.add(urlMatch[1].toLowerCase());
+  }
+
+  if (!tokens.size && normalizedEnd) {
+    tokens.add(normalizedEnd);
+  }
+
+  return Array.from(tokens);
+}
+
+function getVersionLinks(menuElement) {
+  if (!menuElement) {
+    return [];
+  }
+
+  return Array.from(menuElement.querySelectorAll('a[href*="/distribution/"][href*="/version/"]'));
+}
+
+function findVersionMenuByPlatform(end, url) {
+  const expectedTokens = getExpectedPlatformTokens(end, url);
+  const menuCandidates = Array.from(document.querySelectorAll('ul[role="menu"]'))
+    .filter((ul) => getVersionLinks(ul).length > 0);
+
+  if (!menuCandidates.length) {
+    return null;
+  }
+
+  let bestMenu = null;
+  let bestScore = -1;
+
+  for (const ul of menuCandidates) {
+    let score = 0;
+
+    const headingNode = ul.parentElement ? ul.parentElement.querySelector('h2[role="menuitem"],h3[role="menuitem"]') : null;
+    const headingText = normalizePlatformText(headingNode ? headingNode.textContent : "");
+    for (const token of expectedTokens) {
+      if (headingText.indexOf(token) > -1) {
+        score += 4;
+      }
+    }
+
+    const versionLinks = getVersionLinks(ul);
+    for (const link of versionLinks) {
+      const href = (link.getAttribute("href") || "").toLowerCase();
+      if (href.indexOf("inflight") > -1) {
+        score += 2;
+      }
+      for (const token of expectedTokens) {
+        if (href.indexOf("/" + token + "/") > -1) {
+          score += 5;
+        }
+      }
+    }
+
+    if (versionLinks.length) {
+      score += 1;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMenu = ul;
+    }
+  }
+
+  return bestMenu;
+}
+
+function findLegacyVersionMenu(end) {
+  const legacyPlatforms = document.querySelector('[class="Box-sc-18eybku-0 bHeRUM"]');
+  if (!legacyPlatforms) {
+    return null;
+  }
+
+  for (const platform of legacyPlatforms.children) {
     if (
       platform.firstChild &&
       platform.firstChild.firstChild &&
       platform.firstChild.firstChild.textContent.indexOf(end.toString()) > -1
     ) {
-      // 说明：platform.children[1] 是当前平台下「版本列表」的容器，后续会在这里找 inflight / deliverable
-      ul = platform.children[1];
-      console.log("[MagicScript][pageCheck] matched platform ul:", ul);
-      seletedPlatformExist = true;
-      break;
+      return platform.children[1] || null;
     }
   }
 
-  if (!seletedPlatformExist || !ul) {
+  return null;
+}
+
+// 说明：pageCheck 负责在 App Store Connect 的分发页面上定位指定平台下的版本列表，
+// 并根据 directToInflight 参数决定是跳转到 inflight 还是 deliverable。
+function pageCheck(end, directToInflight = false) {
+  console.log("[MagicScript][pageCheck] target platform:", end);
+
+  const url = window.location.toString();
+  console.log("[MagicScript][pageCheck] current url:", url);
+
+  // 如果不在 distribution 页面，则提醒用户先切到正确页面
+  if (url.indexOf("distribution") === -1) {
+    window.alert(
+      "Go the page in App Store Connect where you can edit your app's description first. \n\nThe URL will be like https://appstoreconnect.apple.com/apps/yourAppid/distribution/ios/version/inflight"
+    );
+    return { success: false, ul: null };
+  }
+
+  let ul = findVersionMenuByPlatform(end, url);
+  if (!ul) {
+    ul = findLegacyVersionMenu(end);
+  }
+
+  if (!ul) {
+    console.log("[MagicScript][pageCheck] version menu not found");
     window.alert("The platform you selected is not found");
-    return { success: false, ul: ul };
+    return { success: false, ul: null };
   }
 
-  // 不存在待发布页面，则提醒需要创建新版本
-  let hasInflight = false;
-  let target = ul;
-  // 未发布的 1.0 版本 DOM 结构与正常版本略不同，这里做一次兼容处理
-  if (ul.children.length === 1) {
-    if (ul.firstChild && ul.firstChild.firstChild && ul.firstChild.firstChild.tagName === "DIV") {
-      target = ul.firstChild;
-    }
-  }
+  console.log("[MagicScript][pageCheck] matched platform ul:", ul);
 
-  for (let child of target.children) {
-    if (
-      child.firstChild &&
-      child.firstChild.getAttribute("href") &&
-      child.firstChild.getAttribute("href").indexOf("inflight") > -1
-    ) {
-      console.log("[MagicScript][pageCheck] has inflight version");
-      hasInflight = true;
-    }
-  }
+  const versionLinks = getVersionLinks(ul);
+  const hasInflight = versionLinks.some((link) => {
+    const href = link.getAttribute("href") || "";
+    return href.indexOf("inflight") > -1;
+  });
 
   if (!hasInflight) {
     console.log("[MagicScript][pageCheck] no inflight version found");
@@ -66,34 +148,22 @@ function pageCheck(end, directToInflight = false) {
     return { success: false, ul: ul };
   }
 
-  // 根据 directToInflight 决定是跳到 inflight 还是 deliverable
-  if (directToInflight) {
-    for (let child of target.children) {
-      if (
-        child.firstChild &&
-        child.firstChild.getAttribute("href") &&
-        child.firstChild.getAttribute("href").indexOf("inflight") > -1
-      ) {
-        console.log("[MagicScript][pageCheck] navigate to inflight");
-        child.firstChild.click();
-        return { success: true, ul: ul };
-      }
-    }
-  } else {
-    for (let child of target.children) {
-      if (
-        child.firstChild &&
-        child.firstChild.getAttribute("href") &&
-        child.firstChild.getAttribute("href").indexOf("deliverable") > -1
-      ) {
-        console.log("[MagicScript][pageCheck] navigate to deliverable");
-        child.firstChild.click();
-        return { success: true, ul: ul };
-      }
-    }
+  const targetType = directToInflight ? "inflight" : "deliverable";
+  if (url.indexOf("/version/" + targetType) > -1) {
+    return { success: true, ul: ul };
   }
 
-  // 理论上不会走到这里，但为了安全起见仍然返回失败
+  const targetLink = versionLinks.find((link) => {
+    const href = link.getAttribute("href") || "";
+    return href.indexOf(targetType) > -1;
+  });
+
+  if (targetLink) {
+    console.log("[MagicScript][pageCheck] navigate to " + targetType);
+    targetLink.click();
+    return { success: true, ul: ul };
+  }
+
   console.log("[MagicScript][pageCheck] no matched inflight/deliverable link");
   return { success: false, ul: ul };
 }
