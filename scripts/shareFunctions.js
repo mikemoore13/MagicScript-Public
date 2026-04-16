@@ -97,14 +97,16 @@ function pageCheck(end, directToInflight = false) {
   console.log("[MagicScript][pageCheck] no matched inflight/deliverable link");
   return { success: false, ul: ul };
 }
-const LANGUAGE_MENU_BUTTON_SELECTORS = [
+// shareFunctions.js can be injected multiple times (content scripts + popup executeScript),
+// so use `var` here to avoid top-level redeclaration errors on reinjection.
+var LANGUAGE_MENU_BUTTON_SELECTORS = [
   'button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]',
   'button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 eeVlrs"]',
   'button[class*="Link-sc-1tc8rtf-0"][class*="Box-sc-18eybku-0"]',
   'button[aria-haspopup="menu"]'
 ];
 
-const LANGUAGE_MENU_LIST_SELECTORS = [
+var LANGUAGE_MENU_LIST_SELECTORS = [
   '[class="Box-sc-18eybku-0 MenuList__Outer-sc-rmfrs7-0 djfvjw fpVofh"]',
   '[class="Box-sc-18eybku-0 MenuList__Outer-sc-rmfrs7-0 dhoypH"]',
   '[class*="MenuList__Outer-sc-rmfrs7-0"]',
@@ -112,7 +114,7 @@ const LANGUAGE_MENU_LIST_SELECTORS = [
   '[role="menu"]'
 ];
 
-const LANGUAGE_MENU_ITEM_SELECTORS = [
+var LANGUAGE_MENU_ITEM_SELECTORS = [
   '[class="Box-sc-18eybku-0 cMUEAH"]',
   '[class*="cMUEAH"]',
   '[class*="sc-EgOXT"]',

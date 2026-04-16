@@ -23,6 +23,7 @@
       },
       {
         "matches": ["https://appstoreconnect.apple.com/apps/*"],
+        "exclude_matches": ["https://appstoreconnect.apple.com/apps/*/inflight"],
         "js": ["scripts/content.js", "scripts/replaceButton.js", "scripts/shareFunctions.js"]
       }
     ],
