@@ -12,6 +12,11 @@ chrome.tabs.onUpdated.addListener(function
       chrome.tabs.sendMessage( tabId, {
         message: 'hello!',
         url: changeInfo.url
+      }, function() {
+        if (chrome.runtime.lastError) {
+          // URL 变化早于 content script 注入时会触发此错误，属于可预期场景。
+          return;
+        }
       })
     }
   }
