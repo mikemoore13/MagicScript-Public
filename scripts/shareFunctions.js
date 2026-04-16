@@ -280,26 +280,67 @@ function selectLanguageMenuItemByText(language) {
   return false;
 }
 
-function clickHeadingSaveButton() {
+function clickHeadingSaveButton(retryCount = 0) {
+  const maxRetries = 20;
+  const saveLabelRe = /\b(save|enregistrer|guardar|speichern|salva|salvar|保存|儲存|저장|บันทึก)\b/i;
   const headingButtons = document.querySelector('[id="heading-buttons"]');
-  if (!headingButtons) {
-    console.log("[MagicScript][save] #heading-buttons not found");
+
+  let targetButton = null;
+  if (typeof getSaveElement === "function") {
+    targetButton = getSaveElement({ includeDisabled: true });
+  }
+
+  if (!targetButton && headingButtons) {
+    const buttonCandidates = Array.from(headingButtons.querySelectorAll("button"));
+    targetButton = buttonCandidates.find((button) =>
+      saveLabelRe.test((button.innerText || button.textContent || "").trim())
+    ) || buttonCandidates[0] || headingButtons.firstElementChild;
+  }
+
+  if (!targetButton) {
+    if (retryCount < maxRetries) {
+      setTimeout(() => {
+        clickHeadingSaveButton(retryCount + 1);
+      }, 300);
+    } else {
+      console.log("[MagicScript][save] save button not found");
+    }
     return false;
   }
 
-  const buttonCandidates = Array.from(headingButtons.querySelectorAll("button"));
-  const saveButton = buttonCandidates.find((button) =>
-    /save/i.test((button.innerText || button.textContent || "").trim())
-  );
-
-  const targetButton = saveButton || buttonCandidates[0] || headingButtons.firstElementChild;
-  if (!targetButton) {
-    console.log("[MagicScript][save] save button not found in heading");
+  if (targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
+    if (retryCount < maxRetries) {
+      setTimeout(() => {
+        clickHeadingSaveButton(retryCount + 1);
+      }, 300);
+    } else {
+      console.log("[MagicScript][save] save button stayed disabled");
+    }
     return false;
   }
 
   targetButton.click();
   return true;
+}
+
+function setEditorValue(editor, text) {
+  if (!editor) {
+    return;
+  }
+
+  const safeText = text || "";
+  if (typeof editor.value === "string") {
+    editor.focus();
+    editor.value = safeText;
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    editor.dispatchEvent(new Event("change", { bubbles: true }));
+    return;
+  }
+
+  clearEditor(editor);
+  document.execCommand("insertText", false, safeText);
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+  editor.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function getMenu(copyContents) {
@@ -474,9 +515,9 @@ function pasteWhatsnew(index, items, position, copyContents) {
 
   editor.oninput = () => console.log("Input");
   setTimeout(() => {
-    clearEditor(editor);
+    editor.focus();
     console.log("[MagicScript][pasteWhatsnew] match", targetLanguage);
-    document.execCommand("insertText", false, copyContents[targetLanguage] || "");
+    setEditorValue(editor, copyContents[targetLanguage] || "");
   }, 1000);
 
   //点击保存
@@ -496,6 +537,13 @@ function clearEditor(editor){
   if (!editor) {
     return;
   }
+
+  if (typeof editor.value === "string" && typeof editor.setSelectionRange === "function") {
+    editor.focus();
+    editor.setSelectionRange(0, editor.value.length);
+    return;
+  }
+
   editor.focus();
   // 选中整个编辑器的内容
     const range = document.createRange();

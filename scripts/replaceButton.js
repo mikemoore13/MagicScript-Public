@@ -1,15 +1,165 @@
-function getSaveElement() {
-    const headingButtons = document.querySelector('[id="heading-buttons"]');
-    if (!headingButtons) {
+var SAVE_BUTTON_TEXT_RE = /\b(save|enregistrer|guardar|speichern|salva|salvar|opslaan|menteni|保存|儲存|저장|บันทึก)\b/i;
+var CANCEL_BUTTON_TEXT_RE = /\b(cancel|annuler|abbrechen|cancelar|annulla|cancela|取消|취소)\b/i;
+var replaceButtonRetryTimer = null;
+var replaceButtonRetryCount = 0;
+var MAX_REPLACE_BUTTON_RETRIES = 60;
+var boundSaveButton = null;
+
+function normalizeButtonText(text) {
+    return (text || "").replace(/\s+/g, " ").trim();
+}
+
+function isVisibleButton(button) {
+    if (!button) {
+        return false;
+    }
+
+    const rect = button.getBoundingClientRect();
+    if (!rect || (rect.width <= 0 && rect.height <= 0)) {
+        return false;
+    }
+
+    const style = window.getComputedStyle(button);
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+}
+
+function isDisabledButton(button) {
+    return Boolean(button && (button.disabled || button.getAttribute("aria-disabled") === "true"));
+}
+
+function getButtonMetadataText(button) {
+    const attrList = [
+        "id",
+        "name",
+        "type",
+        "aria-label",
+        "data-testid",
+        "data-testid",
+        "data-test-id",
+        "class"
+    ];
+
+    const values = [];
+    for (const attr of attrList) {
+        const value = button.getAttribute(attr);
+        if (value) {
+            values.push(value);
+        }
+    }
+    return normalizeButtonText(values.join(" ")).toLowerCase();
+}
+
+function scoreSaveButtonCandidate(button) {
+    if (!button) {
+        return -10000;
+    }
+
+    let score = 0;
+    const text = normalizeButtonText(button.innerText || button.textContent || "");
+    const metadataText = getButtonMetadataText(button);
+    const inHeading = Boolean(button.closest('[id="heading-buttons"]'));
+
+    if (!isVisibleButton(button)) {
+        return -1000;
+    }
+
+    if (SAVE_BUTTON_TEXT_RE.test(text)) {
+        score += 140;
+    }
+
+    if (CANCEL_BUTTON_TEXT_RE.test(text)) {
+        score -= 200;
+    }
+
+    if (/(save|submit|enregistrer|guardar|speichern|salva|salvar|保存|儲存|저장)/i.test(metadataText)) {
+        score += 90;
+    }
+
+    if (/(cancel|annuler|abbrechen|cancelar|annulla|cancela|取消|취소)/i.test(metadataText)) {
+        score -= 120;
+    }
+
+    if (button.getAttribute("type") === "submit") {
+        score += 70;
+    }
+
+    if (/(primary|cta|filled|brand|action)/i.test(metadataText)) {
+        score += 20;
+    }
+
+    if (inHeading) {
+        score += 30;
+    }
+
+    if (isDisabledButton(button)) {
+        score -= 20;
+    }
+
+    if (!text) {
+        score -= 10;
+    }
+
+    return score;
+}
+
+function getSaveElement(options = {}) {
+    const includeDisabled = options.includeDisabled !== false;
+    const candidates = [];
+    const seen = new Set();
+    const selectors = [
+        '[id="heading-buttons"] button',
+        'main button',
+        'button[type="submit"]',
+        'button[aria-label]',
+        'button[data-testid]',
+        'button[data-testid]',
+        'button[data-test-id]',
+        'button'
+    ];
+
+    for (const selector of selectors) {
+        for (const button of document.querySelectorAll(selector)) {
+            if (!seen.has(button)) {
+                seen.add(button);
+                candidates.push(button);
+            }
+        }
+    }
+
+    if (!candidates.length) {
         return null;
     }
 
-    const buttonList = Array.from(headingButtons.querySelectorAll("button"));
-    const saveButton = buttonList.find((button) =>
-        /save/i.test((button.innerText || button.textContent || "").trim())
-    );
+    let bestButton = null;
+    let bestScore = -10000;
+    for (const button of candidates) {
+        if (!includeDisabled && isDisabledButton(button)) {
+            continue;
+        }
+        const score = scoreSaveButtonCandidate(button);
+        if (score > bestScore) {
+            bestScore = score;
+            bestButton = button;
+        }
+    }
 
-    return saveButton || buttonList[1] || buttonList[0] || headingButtons.children[1] || null;
+    if (!bestButton || bestScore < 60) {
+        return null;
+    }
+
+    return bestButton;
+}
+
+function scheduleReplaceButtonRetry() {
+    if (replaceButtonRetryTimer || replaceButtonRetryCount >= MAX_REPLACE_BUTTON_RETRIES) {
+        return;
+    }
+
+    replaceButtonRetryTimer = setTimeout(() => {
+        replaceButtonRetryTimer = null;
+        replaceButtonRetryCount += 1;
+        replaceButton();
+    }, 500);
 }
 
 function getMetadataMenuItems() {
@@ -79,10 +229,18 @@ function replaceButton() {
     const saveElement = getSaveElement();
     if (!saveElement) {
         console.log("[MagicScript][replaceButton] save button not found");
+        scheduleReplaceButtonRetry();
         return;
+    }
+
+    replaceButtonRetryCount = 0;
+
+    if (boundSaveButton && boundSaveButton !== saveElement) {
+        boundSaveButton.removeEventListener("click", clickSubmit);
     }
     saveElement.removeEventListener("click", clickSubmit);
     saveElement.addEventListener("click", clickSubmit);
+    boundSaveButton = saveElement;
 }
 
 function clickSubmit(event) {
@@ -99,14 +257,16 @@ function clickSubmit(event) {
 }
 
 function reproduceDefaultAction() {
-    const saveElement = getSaveElement();
+    const saveElement = getSaveElement() || boundSaveButton;
     if (!saveElement) {
         console.log("[MagicScript][reproduceDefaultAction] save button not found");
         return;
     }
     saveElement.removeEventListener("click", clickSubmit);
     saveElement.click();
-    replaceButton();
+    setTimeout(() => {
+        replaceButton();
+    }, 400);
 }
 
 function saveMetaData() {
