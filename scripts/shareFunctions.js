@@ -1,64 +1,146 @@
-// 说明：pageCheck 负责在 App Store Connect 的分发页面上定位指定平台下的版本列表，
-// 并根据 directToInflight 参数决定是跳转到 inflight 还是 deliverable。
-function pageCheck(end, directToInflight = false) {
-  // App Store Connect 左侧平台列表容器（iOS / macOS / tvOS 等）
-  const platforms = document.querySelector('[class="Box-sc-18eybku-0 bHeRUM"]');
-  let ul;
+function normalizePlatformText(text) {
+  return (text || "").replace(/\s+/g, "").toLowerCase();
+}
 
-  console.log("[MagicScript][pageCheck] target platform:", end);
+function getExpectedPlatformTokens(end, url) {
+  const tokens = new Set();
+  const normalizedEnd = normalizePlatformText(end);
 
-  const url = window.location.toString();
-
-  console.log("[MagicScript][pageCheck] current url:", url);
-  // 如果不在 distribution 页面，则提醒用户先切到正确页面
-  if (!platforms || url.indexOf("distribution") === -1) {
-    window.alert(
-      "Go the page in App Store Connect where you can edit your app's description first. \n\nThe URL will be like https://appstoreconnect.apple.com/apps/yourAppid/distribution/ios/version/inflight"
-    );
-    return { success: false, ul: ul };
+  if (normalizedEnd.indexOf("ios") > -1 || normalizedEnd.indexOf("iphone") > -1 || normalizedEnd.indexOf("ipad") > -1) {
+    tokens.add("ios");
+  }
+  if (normalizedEnd.indexOf("mac") > -1) {
+    tokens.add("macos");
+  }
+  if (normalizedEnd.indexOf("tv") > -1) {
+    tokens.add("tvos");
+  }
+  if (normalizedEnd.indexOf("vision") > -1) {
+    tokens.add("visionos");
   }
 
-  let seletedPlatformExist = false;
-  for (let platform of platforms.children) {
-    console.log("[MagicScript][pageCheck] platform node:", platform);
+  const urlMatch = (url || "").match(/\/distribution\/([^\/]+)\/version\//i);
+  if (urlMatch && urlMatch[1]) {
+    tokens.add(urlMatch[1].toLowerCase());
+  }
+
+  if (!tokens.size && normalizedEnd) {
+    tokens.add(normalizedEnd);
+  }
+
+  return Array.from(tokens);
+}
+
+function getVersionLinks(menuElement) {
+  if (!menuElement) {
+    return [];
+  }
+
+  return Array.from(menuElement.querySelectorAll('a[href*="/distribution/"][href*="/version/"]'));
+}
+
+function findVersionMenuByPlatform(end, url) {
+  const expectedTokens = getExpectedPlatformTokens(end, url);
+  const menuCandidates = Array.from(document.querySelectorAll('ul[role="menu"]'))
+    .filter((ul) => getVersionLinks(ul).length > 0);
+
+  if (!menuCandidates.length) {
+    return null;
+  }
+
+  let bestMenu = null;
+  let bestScore = -1;
+
+  for (const ul of menuCandidates) {
+    let score = 0;
+
+    const headingNode = ul.parentElement ? ul.parentElement.querySelector('h2[role="menuitem"],h3[role="menuitem"]') : null;
+    const headingText = normalizePlatformText(headingNode ? headingNode.textContent : "");
+    for (const token of expectedTokens) {
+      if (headingText.indexOf(token) > -1) {
+        score += 4;
+      }
+    }
+
+    const versionLinks = getVersionLinks(ul);
+    for (const link of versionLinks) {
+      const href = (link.getAttribute("href") || "").toLowerCase();
+      if (href.indexOf("inflight") > -1) {
+        score += 2;
+      }
+      for (const token of expectedTokens) {
+        if (href.indexOf("/" + token + "/") > -1) {
+          score += 5;
+        }
+      }
+    }
+
+    if (versionLinks.length) {
+      score += 1;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMenu = ul;
+    }
+  }
+
+  return bestMenu;
+}
+
+function findLegacyVersionMenu(end) {
+  const legacyPlatforms = document.querySelector('[class="Box-sc-18eybku-0 bHeRUM"]');
+  if (!legacyPlatforms) {
+    return null;
+  }
+
+  for (const platform of legacyPlatforms.children) {
     if (
       platform.firstChild &&
       platform.firstChild.firstChild &&
       platform.firstChild.firstChild.textContent.indexOf(end.toString()) > -1
     ) {
-      // 说明：platform.children[1] 是当前平台下「版本列表」的容器，后续会在这里找 inflight / deliverable
-      ul = platform.children[1];
-      console.log("[MagicScript][pageCheck] matched platform ul:", ul);
-      seletedPlatformExist = true;
-      break;
+      return platform.children[1] || null;
     }
   }
 
-  if (!seletedPlatformExist || !ul) {
+  return null;
+}
+
+// 说明：pageCheck 负责在 App Store Connect 的分发页面上定位指定平台下的版本列表，
+// 并根据 directToInflight 参数决定是跳转到 inflight 还是 deliverable。
+function pageCheck(end, directToInflight = false) {
+  console.log("[MagicScript][pageCheck] target platform:", end);
+
+  const url = window.location.toString();
+  console.log("[MagicScript][pageCheck] current url:", url);
+
+  // 如果不在 distribution 页面，则提醒用户先切到正确页面
+  if (url.indexOf("distribution") === -1) {
+    window.alert(
+      "Go the page in App Store Connect where you can edit your app's description first. \n\nThe URL will be like https://appstoreconnect.apple.com/apps/yourAppid/distribution/ios/version/inflight"
+    );
+    return { success: false, ul: null };
+  }
+
+  let ul = findVersionMenuByPlatform(end, url);
+  if (!ul) {
+    ul = findLegacyVersionMenu(end);
+  }
+
+  if (!ul) {
+    console.log("[MagicScript][pageCheck] version menu not found");
     window.alert("The platform you selected is not found");
-    return { success: false, ul: ul };
+    return { success: false, ul: null };
   }
 
-  // 不存在待发布页面，则提醒需要创建新版本
-  let hasInflight = false;
-  let target = ul;
-  // 未发布的 1.0 版本 DOM 结构与正常版本略不同，这里做一次兼容处理
-  if (ul.children.length === 1) {
-    if (ul.firstChild && ul.firstChild.firstChild && ul.firstChild.firstChild.tagName === "DIV") {
-      target = ul.firstChild;
-    }
-  }
+  console.log("[MagicScript][pageCheck] matched platform ul:", ul);
 
-  for (let child of target.children) {
-    if (
-      child.firstChild &&
-      child.firstChild.getAttribute("href") &&
-      child.firstChild.getAttribute("href").indexOf("inflight") > -1
-    ) {
-      console.log("[MagicScript][pageCheck] has inflight version");
-      hasInflight = true;
-    }
-  }
+  const versionLinks = getVersionLinks(ul);
+  const hasInflight = versionLinks.some((link) => {
+    const href = link.getAttribute("href") || "";
+    return href.indexOf("inflight") > -1;
+  });
 
   if (!hasInflight) {
     console.log("[MagicScript][pageCheck] no inflight version found");
@@ -66,226 +148,472 @@ function pageCheck(end, directToInflight = false) {
     return { success: false, ul: ul };
   }
 
-  // 根据 directToInflight 决定是跳到 inflight 还是 deliverable
-  if (directToInflight) {
-    for (let child of target.children) {
-      if (
-        child.firstChild &&
-        child.firstChild.getAttribute("href") &&
-        child.firstChild.getAttribute("href").indexOf("inflight") > -1
-      ) {
-        console.log("[MagicScript][pageCheck] navigate to inflight");
-        child.firstChild.click();
-        return { success: true, ul: ul };
-      }
-    }
-  } else {
-    for (let child of target.children) {
-      if (
-        child.firstChild &&
-        child.firstChild.getAttribute("href") &&
-        child.firstChild.getAttribute("href").indexOf("deliverable") > -1
-      ) {
-        console.log("[MagicScript][pageCheck] navigate to deliverable");
-        child.firstChild.click();
-        return { success: true, ul: ul };
-      }
-    }
+  const targetType = directToInflight ? "inflight" : "deliverable";
+  if (url.indexOf("/version/" + targetType) > -1) {
+    return { success: true, ul: ul };
   }
 
-  // 理论上不会走到这里，但为了安全起见仍然返回失败
+  const targetLink = versionLinks.find((link) => {
+    const href = link.getAttribute("href") || "";
+    return href.indexOf(targetType) > -1;
+  });
+
+  if (targetLink) {
+    console.log("[MagicScript][pageCheck] navigate to " + targetType);
+    targetLink.click();
+    return { success: true, ul: ul };
+  }
+
   console.log("[MagicScript][pageCheck] no matched inflight/deliverable link");
   return { success: false, ul: ul };
 }
-  function getMenu(copyContents){
-    // 为了便于调试 App Store Connect 语言菜单 DOM 变化，这里增加详细日志和空值检查
-    // 这里显式限制为 button，避免页面上其他拥有同样 class 的元素被误选
-    const languageMenuSelector = 'button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]'
-    const menuListSelector = '[class="Box-sc-18eybku-0 MenuList__Outer-sc-rmfrs7-0 djfvjw fpVofh"]'
-    const menuItemSelector = '[class="Box-sc-18eybku-0 cMUEAH"]'
+// shareFunctions.js can be injected multiple times (content scripts + popup executeScript),
+// so use `var` here to avoid top-level redeclaration errors on reinjection.
+var LANGUAGE_MENU_BUTTON_SELECTORS = [
+  'button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]',
+  'button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 eeVlrs"]',
+  'button[class*="Link-sc-1tc8rtf-0"][class*="Box-sc-18eybku-0"]',
+  'button[aria-haspopup="menu"]'
+];
 
-    console.log("[MagicScript][getMenu] start getMenu")
+var LANGUAGE_MENU_LIST_SELECTORS = [
+  '[class="Box-sc-18eybku-0 MenuList__Outer-sc-rmfrs7-0 djfvjw fpVofh"]',
+  '[class="Box-sc-18eybku-0 MenuList__Outer-sc-rmfrs7-0 dhoypH"]',
+  '[class*="MenuList__Outer-sc-rmfrs7-0"]',
+  '[class*="MenuList__Outer"]',
+  '[role="menu"]'
+];
 
-    // 点击语言下拉按钮
-    const languageMenuButton = document.querySelector(languageMenuSelector)
-    if (!languageMenuButton){
-      console.log("[MagicScript][getMenu] language menu button not found, selector:", languageMenuSelector)
-      return []
-    }
-    languageMenuButton.click()
-    console.log("[MagicScript][getMenu] language menu button clicked")
+var LANGUAGE_MENU_ITEM_SELECTORS = [
+  '[class="Box-sc-18eybku-0 cMUEAH"]',
+  '[class*="cMUEAH"]',
+  '[class*="sc-EgOXT"]',
+  '[role="menuitem"]'
+];
 
-    // 获取语言列表容器
-    const ul = document.querySelector(menuListSelector)
-    if (!ul){
-      console.log("[MagicScript][getMenu] language menu list not found, selector:", menuListSelector)
-      return []
-    }
-    console.log("[MagicScript][getMenu] language list element:", ul)
-    console.log("[MagicScript][getMenu] language list children count:", ul.children ? ul.children.length : 0)
-
-    // 将 menu 下的所有语言存储到词典中，并打详细日志
-    for (let child of ul.children){
-      const item = child.querySelector(menuItemSelector)
-      if (!item || !item.firstChild){
-        console.log("[MagicScript][getMenu] skip invalid menu item:", child)
-        continue
-      }
-      console.log("[MagicScript][getMenu] raw menu item node:", item.firstChild)
-      let language = item.firstChild.textContent
-      console.log("[MagicScript][getMenu] detected language:", language)
-      copyContents[language] = ""
-    }
-
-    const menuItems = document.querySelectorAll(menuItemSelector)
-    console.log("[MagicScript][getMenu] final menuItems length:", menuItems.length)
-    return menuItems
-  }
-  function copyAndPaste(position, ul){
-    var copyContents = {}
-    let menuItems = getMenu(copyContents)
-    //遍历并且切换语言，将语言下的whatnew内容保存到词典中
-    for (let language in copyContents){
-      // 这里同样限制为 button，避免误点非按钮元素
-      document.querySelector('button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]').click()
-      for (item of menuItems) {
-        console.log(item)
-        if (item.firstChild.textContent == language){
-         item.click()
-         copyContents[language] = copyWhatsnew(position)
-        }    
-      }
-    }
-    //切换到准备发布的tab(准备发布和已发布的class id 都是Box-sc-18eybku-0 eEFQij，逻辑是切换到第一个匹配元素，即准备发布)
-    ul.firstChild.firstChild.click()
-    //使用迭代的方式实现所有语言的粘贴
-    setTimeout(() => {
-      //点击语言menu
-      document.querySelector('button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]').click()
-      let menuItems = document.querySelectorAll('[class="Box-sc-18eybku-0 cMUEAH"]')
-      //使用迭代的方式实现所有语言的粘贴
-      pasteWhatsnew(0, menuItems, position, copyContents)
-    }, 3000);
-  }
-  async function copyAndPastePrimary(position, ul, isTranslation = false){
-    var copyContents = {}
-    let menuItems = getMenu(copyContents)
-    //复制主语言
-    // 主语言复制时也限定点击 button，防止 DOM 结构变更导致选错元素
-    document.querySelector('button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]').click()
-    menuItems[0].click()
-    console.log("menuitem", menuItems[0])
-    let primaryContent = copyWhatsnew(position)
-    let translateResult
-    if (isTranslation){
-      let languageList = []
-      for (let language in copyContents){
-        languageList.push(language)
-      }
-      let textContent = await fetchTextContent()
-      console.log("textContent", textContent)
-      translateResult = await translate(textContent, languageList)
-    }
-    //遍历并且切换语言，将primary语言下的whatnew内容复制并保存
-    console.log("copyContents", copyContents)
-    console.log("menuItems", menuItems)
-    for (let language in copyContents){
-      // 每次切换语言前，统一通过 button 选择语言菜单
-      document.querySelector('button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]').click()
-      for (item of menuItems) {
-        console.log(item)
-        if (item.firstChild.textContent == language){
-         item.click()
-         console.log("translate Result", language)
-         if (isTranslation){
-          copyContents[language] = translateResult[language]
-         }else{
-          copyContents[language] = primaryContent
-         }
-        }    
-      }
-    }
-    //切换到准备发布的tab
-    ul.firstChild.firstChild.click()
-    //使用迭代的方式实现所有语言的粘贴
-    setTimeout(() => {
-      //点击语言menu
-      document.querySelector('button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]').click()
-      let menuItems = document.querySelectorAll('[class="Box-sc-18eybku-0 cMUEAH"]')
-      //使用迭代的方式实现所有语言的粘贴
-      if (menuItems.length > 1){
-        pasteWhatsnew(0, menuItems, position, copyContents)
-      }
-    }, 3000);
-  }
-  function copyWhatsnew(position) {
-    if (document.querySelector('[name="'+position+'"]').querySelector("div") != null){
-      const element = document.querySelector('[name="'+position+'"]');
-      // 获取所有文本内容，包括换行
-      return Array.from(element.childNodes)
-        .map(node => {
-          if (node.innerHTML === '<br>') return '';
-          // 否则返回文本内容
-          return node.innerText;
-        })
-        .join('\n')
-        .trim();
-    }else{
-      return ""
+function queryFirstBySelectors(selectors, root = document) {
+  for (const selector of selectors) {
+    const element = root.querySelector(selector);
+    if (element) {
+      return element;
     }
   }
-  function copyInput(position) {
-    console.log("print1")
-    console.log(document.querySelector('[name="'+position+'"]'))
-    console.log("print 2")
-    console.log(document.querySelector('[name="'+position+'"]').value)
-    return document.querySelector('[name="'+position+'"]').value
+  return null;
+}
+
+function matchesAnySelector(element, selectors) {
+  if (!element || typeof element.matches !== "function") {
+    return false;
   }
+
+  for (const selector of selectors) {
+    if (element.matches(selector)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getLanguageMenuButton() {
+  const candidates = [];
+  const seen = new Set();
+
+  for (const selector of LANGUAGE_MENU_BUTTON_SELECTORS) {
+    for (const button of document.querySelectorAll(selector)) {
+      if (!seen.has(button)) {
+        seen.add(button);
+        candidates.push(button);
+      }
+    }
+  }
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  const preferredButton = candidates.find((button) => {
+    const label = (button.innerText || button.textContent || "").trim();
+    return label && label.indexOf("(") > -1 && label.indexOf(")") > -1;
+  });
+
+  return preferredButton || candidates[0];
+}
+
+function clickLanguageMenuButton() {
+  const languageMenuButton = getLanguageMenuButton();
+  if (!languageMenuButton) {
+    console.log("[MagicScript][languageMenu] language menu button not found");
+    return false;
+  }
+  languageMenuButton.click();
+  return true;
+}
+
+function getLanguageMenuList() {
+  return queryFirstBySelectors(LANGUAGE_MENU_LIST_SELECTORS);
+}
+
+function getMenuItemText(item) {
+  if (!item) {
+    return "";
+  }
+
+  const rawText = item.innerText || item.textContent || "";
+  if (!rawText) {
+    return "";
+  }
+
+  return rawText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)[0] || "";
+}
+
+function getMenuItemNode(child) {
+  if (!child) {
+    return null;
+  }
+
+  if (matchesAnySelector(child, LANGUAGE_MENU_ITEM_SELECTORS)) {
+    return child;
+  }
+
+  const nestedItem = queryFirstBySelectors(LANGUAGE_MENU_ITEM_SELECTORS, child);
+  return nestedItem || child;
+}
+
+function getMenuItemsFromOpenMenu() {
+  const ul = getLanguageMenuList();
+  if (!ul) {
+    return [];
+  }
+
+  const menuItems = [];
+  const languageSet = new Set();
+
+  for (const child of ul.children) {
+    const itemNode = getMenuItemNode(child);
+    const language = getMenuItemText(itemNode);
+    if (!language || languageSet.has(language)) {
+      continue;
+    }
+    menuItems.push(itemNode);
+    languageSet.add(language);
+  }
+
+  if (menuItems.length) {
+    return menuItems;
+  }
+
+  for (const itemNode of ul.querySelectorAll('[role="menuitem"]')) {
+    const language = getMenuItemText(itemNode);
+    if (!language || languageSet.has(language)) {
+      continue;
+    }
+    menuItems.push(itemNode);
+    languageSet.add(language);
+  }
+  return menuItems;
+}
+
+function ensureLanguageMenuOpen() {
+  if (getLanguageMenuList()) {
+    return true;
+  }
+
+  if (!clickLanguageMenuButton()) {
+    return false;
+  }
+
+  return Boolean(getLanguageMenuList());
+}
+
+function selectLanguageMenuItemByText(language) {
+  if (!language) {
+    return false;
+  }
+
+  if (!ensureLanguageMenuOpen()) {
+    console.log("[MagicScript][languageMenu] menu list not found when selecting:", language);
+    return false;
+  }
+
+  const menuItems = getMenuItemsFromOpenMenu();
+  for (const item of menuItems) {
+    if (getMenuItemText(item) === language) {
+      item.click();
+      return true;
+    }
+  }
+
+  console.log("[MagicScript][languageMenu] language item not found:", language);
+  return false;
+}
+
+function clickHeadingSaveButton(retryCount = 0) {
+  const maxRetries = 20;
+  const saveLabelRe = /\b(save|enregistrer|guardar|speichern|salva|salvar|保存|儲存|저장|บันทึก)\b/i;
+  const headingButtons = document.querySelector('[id="heading-buttons"]');
+
+  let targetButton = null;
+  if (typeof getSaveElement === "function") {
+    targetButton = getSaveElement({ includeDisabled: true });
+  }
+
+  if (!targetButton && headingButtons) {
+    const buttonCandidates = Array.from(headingButtons.querySelectorAll("button"));
+    targetButton = buttonCandidates.find((button) =>
+      saveLabelRe.test((button.innerText || button.textContent || "").trim())
+    ) || buttonCandidates[0] || headingButtons.firstElementChild;
+  }
+
+  if (!targetButton) {
+    if (retryCount < maxRetries) {
+      setTimeout(() => {
+        clickHeadingSaveButton(retryCount + 1);
+      }, 300);
+    } else {
+      console.log("[MagicScript][save] save button not found");
+    }
+    return false;
+  }
+
+  if (targetButton.disabled || targetButton.getAttribute("aria-disabled") === "true") {
+    if (retryCount < maxRetries) {
+      setTimeout(() => {
+        clickHeadingSaveButton(retryCount + 1);
+      }, 300);
+    } else {
+      console.log("[MagicScript][save] save button stayed disabled");
+    }
+    return false;
+  }
+
+  targetButton.click();
+  return true;
+}
+
+function setEditorValue(editor, text) {
+  if (!editor) {
+    return;
+  }
+
+  const safeText = text || "";
+  if (typeof editor.value === "string") {
+    editor.focus();
+    editor.value = safeText;
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    editor.dispatchEvent(new Event("change", { bubbles: true }));
+    return;
+  }
+
+  clearEditor(editor);
+  document.execCommand("insertText", false, safeText);
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+  editor.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function getMenu(copyContents) {
+  console.log("[MagicScript][getMenu] start getMenu");
+
+  if (!ensureLanguageMenuOpen()) {
+    console.log("[MagicScript][getMenu] failed to open language menu");
+    return [];
+  }
+
+  const ul = getLanguageMenuList();
+  if (!ul) {
+    console.log("[MagicScript][getMenu] language menu list not found");
+    return [];
+  }
+
+  console.log("[MagicScript][getMenu] language list element:", ul);
+  console.log("[MagicScript][getMenu] language list children count:", ul.children ? ul.children.length : 0);
+
+  const menuItems = getMenuItemsFromOpenMenu();
+  for (const item of menuItems) {
+    const language = getMenuItemText(item);
+    if (!language) {
+      console.log("[MagicScript][getMenu] skip invalid menu item:", item);
+      continue;
+    }
+    copyContents[language] = "";
+  }
+
+  console.log("[MagicScript][getMenu] final menuItems length:", menuItems.length);
+  return menuItems;
+}
+function copyAndPaste(position, ul) {
+  const copyContents = {};
+  const menuItems = getMenu(copyContents);
+  if (!menuItems.length) {
+    console.log("[MagicScript][copyAndPaste] no language menu items found");
+    return;
+  }
+
+  //遍历并且切换语言，将语言下的whatnew内容保存到词典中
+  for (const language in copyContents) {
+    if (!selectLanguageMenuItemByText(language)) {
+      continue;
+    }
+    copyContents[language] = copyWhatsnew(position);
+  }
+
+  //切换到准备发布的tab(准备发布和已发布的class id 都是Box-sc-18eybku-0 eEFQij，逻辑是切换到第一个匹配元素，即准备发布)
+  if (ul && ul.firstChild && ul.firstChild.firstChild) {
+    ul.firstChild.firstChild.click();
+  }
+
+  //使用迭代的方式实现所有语言的粘贴
+  setTimeout(() => {
+    pasteWhatsnew(0, menuItems, position, copyContents);
+  }, 3000);
+}
+async function copyAndPastePrimary(position, ul, isTranslation = false) {
+  const copyContents = {};
+  const menuItems = getMenu(copyContents);
+  if (!menuItems.length) {
+    console.log("[MagicScript][copyAndPastePrimary] no language menu items found");
+    return;
+  }
+
+  const primaryLanguage = getMenuItemText(menuItems[0]);
+  if (!selectLanguageMenuItemByText(primaryLanguage)) {
+    console.log("[MagicScript][copyAndPastePrimary] failed to select primary language");
+    return;
+  }
+
+  const primaryContent = copyWhatsnew(position);
+  let translateResult;
+  if (isTranslation) {
+    const languageList = [];
+    for (const language in copyContents) {
+      languageList.push(language);
+    }
+    const textContent = await fetchTextContent();
+    console.log("textContent", textContent);
+    translateResult = await translate(textContent, languageList);
+  }
+
+  //遍历并且切换语言，将primary语言下的whatnew内容复制并保存
+  console.log("copyContents", copyContents);
+  console.log("menuItems", menuItems);
+  for (const language in copyContents) {
+    if (!selectLanguageMenuItemByText(language)) {
+      continue;
+    }
+
+    console.log("translate Result", language);
+    if (isTranslation) {
+      copyContents[language] = (translateResult && translateResult[language]) || primaryContent;
+    } else {
+      copyContents[language] = primaryContent;
+    }
+  }
+
+  //切换到准备发布的tab
+  if (ul && ul.firstChild && ul.firstChild.firstChild) {
+    ul.firstChild.firstChild.click();
+  }
+
+  //使用迭代的方式实现所有语言的粘贴
+  setTimeout(() => {
+    if (menuItems.length > 0) {
+      pasteWhatsnew(0, menuItems, position, copyContents);
+    }
+  }, 3000);
+}
+function copyWhatsnew(position) {
+  const element = document.querySelector('[name="' + position + '"]');
+  if (!element) {
+    console.log("[MagicScript][copyWhatsnew] element not found:", position);
+    return "";
+  }
+
+  if (element.querySelector("div") != null) {
+    // 获取所有文本内容，包括换行
+    return Array.from(element.childNodes)
+      .map((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.innerHTML === "<br>") {
+          return "";
+        }
+        return node.innerText || node.textContent || "";
+      })
+      .join("\n")
+      .trim();
+  }
+
+  return element.value || "";
+}
+
+function copyInput(position) {
+  const inputElement = document.querySelector('[name="' + position + '"]');
+  console.log("print1");
+  console.log(inputElement);
+  if (!inputElement) {
+    return "";
+  }
+
+  console.log("print 2");
+  console.log(inputElement.value);
+  return inputElement.value || "";
+}
   
-  function pasteWhatsnew(index, items, position, copyContents){
-    console.log(`items ${items}`)
-    console.log(`items[index] ${items[index]}`)
-    let menuItems = document.querySelectorAll('[class="Box-sc-18eybku-0 cMUEAH"]')
-    console.log(`menuItems ${menuItems}`)
-    //切换语言，不能直接点击items[index]，必须点击新获取的menuItems中的元素，所以需要循环
-    for (ite of menuItems) {
-      console.log("ite.innerText vs items[index].innerText")
-      console.log(ite.innerText)
-      console.log(items[index].innerText)
-      if (ite.innerText == items[index].innerText){
-        console.log("try to click2")
-        console.log(ite)
-        console.log(items[index])
-        ite.click()
-      }    
-    }
-    //粘贴文本
-    console.log("position")
-    console.log(position)
-    const editor = document.querySelector('[name="'+position+'"]');
-    editor.oninput = (e) => console.log('Input');
-    setTimeout(() => {
-      clearEditor(editor)
-      console.log(`match ${items[index].innerText}`)
-      let language2 = items[index].firstChild.textContent
-      document.execCommand('insertText', false, copyContents[language2]);
-    }, 1000);
-    //点击保存
-    setTimeout(() => {
-      //save
-      document.querySelector('[id="heading-buttons"]').firstChild.click()
-    }, 2000);
-    //打开菜单，迭代函数
-    setTimeout(() => {
-      if (index < items.length - 1){
-        //open menu
-        document.querySelector('button[class="Box-sc-18eybku-0 Link-sc-1tc8rtf-0 jijsjF iKZzlZ"]').click()
-        pasteWhatsnew(index+1, items, position, copyContents)
-      }
-    }, 5000)
+function pasteWhatsnew(index, items, position, copyContents) {
+  if (!items || !items.length || index >= items.length) {
+    console.log("[MagicScript][pasteWhatsnew] invalid items or index", index);
+    return;
   }
+
+  const targetLanguage = getMenuItemText(items[index]);
+  if (!targetLanguage) {
+    console.log("[MagicScript][pasteWhatsnew] invalid language at index:", index);
+    return;
+  }
+
+  if (!selectLanguageMenuItemByText(targetLanguage)) {
+    console.log("[MagicScript][pasteWhatsnew] failed to select language:", targetLanguage);
+    return;
+  }
+
+  //粘贴文本
+  const editor = document.querySelector('[name="' + position + '"]');
+  if (!editor) {
+    console.log("[MagicScript][pasteWhatsnew] editor not found:", position);
+    return;
+  }
+
+  editor.oninput = () => console.log("Input");
+  setTimeout(() => {
+    editor.focus();
+    console.log("[MagicScript][pasteWhatsnew] match", targetLanguage);
+    setEditorValue(editor, copyContents[targetLanguage] || "");
+  }, 1000);
+
+  //点击保存
+  setTimeout(() => {
+    clickHeadingSaveButton();
+  }, 2000);
+
+  //迭代函数
+  setTimeout(() => {
+    if (index < items.length - 1) {
+      pasteWhatsnew(index + 1, items, position, copyContents);
+    }
+  }, 5000);
+}
 
 function clearEditor(editor){
+  if (!editor) {
+    return;
+  }
+
+  if (typeof editor.value === "string" && typeof editor.setSelectionRange === "function") {
+    editor.focus();
+    editor.setSelectionRange(0, editor.value.length);
+    return;
+  }
+
   editor.focus();
   // 选中整个编辑器的内容
     const range = document.createRange();

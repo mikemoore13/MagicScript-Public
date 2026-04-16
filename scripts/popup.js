@@ -39,7 +39,7 @@ function showExecutionNotification(){
     }, 10000);
 }
 
-// 获取当前选中的类型（whatsNew 或 promotionalText）
+// 获取当前选中的类型（whatsNew / promotionalText / both）
 function getSelectedType() {
     return document.querySelector('input[name="type"]:checked').value;
 }
@@ -51,6 +51,41 @@ function getSelectedPlatform() {
 // 获取当前选中的操作（copy_latest、copy_primary 或 copy_primary_translation）
 function getSelectedOperation() {
     return document.querySelector('input[name="copyOption"]:checked').value;
+}
+
+function resolveTargetTypes(selectedType) {
+    if (selectedType === "both") {
+        return ["whatsNew", "promotionalText"];
+    }
+    return [selectedType];
+}
+
+function appendOperationScripts(scriptFiles, selectedOperation, selectedType) {
+    const targetTypes = resolveTargetTypes(selectedType);
+    const uniqueFiles = new Set(scriptFiles);
+
+    if (selectedOperation === "copy_latest") {
+        uniqueFiles.add("scripts/config.js");
+        uniqueFiles.add("scripts/eventTracker.js");
+        for (const type of targetTypes) {
+            uniqueFiles.add(`scripts/${type}.js`);
+        }
+    } else if (selectedOperation === "copy_primary") {
+        uniqueFiles.add("scripts/config.js");
+        uniqueFiles.add("scripts/eventTracker.js");
+        for (const type of targetTypes) {
+            uniqueFiles.add(`scripts/${type}Primary.js`);
+        }
+    } else if (selectedOperation === "copy_primary_translation") {
+        uniqueFiles.add("scripts/config.js");
+        uniqueFiles.add("scripts/eventTracker.js");
+        uniqueFiles.add("scripts/translate.js");
+        for (const type of targetTypes) {
+            uniqueFiles.add(`scripts/${type}PrimaryTranslation.js`);
+        }
+    }
+
+    return Array.from(uniqueFiles);
 }
 
 // 处理 execute 按钮点击，根据选中的类型和操作执行对应的功能
@@ -73,17 +108,13 @@ async function executeScript() {
     // 根据选中的操作和类型决定加载哪些脚本
     switch (selectedOperation) {
         case "copy_latest":
-            // 说明：埋点服务依赖 config.js 中的私有配置，因此需要优先注入 config.js。
-            scriptFiles.push("scripts/config.js", "scripts/eventTracker.js", `scripts/${selectedType}.js`);
+            scriptFiles = appendOperationScripts(scriptFiles, selectedOperation, selectedType);
             break;
         case "copy_primary":
-            // 同上，保证 EventTracker 能够正确读取埋点服务地址。
-            scriptFiles.push("scripts/config.js", "scripts/eventTracker.js", `scripts/${selectedType}Primary.js`);
+            scriptFiles = appendOperationScripts(scriptFiles, selectedOperation, selectedType);
             break;
         case "copy_primary_translation":
-            // 说明：当使用翻译功能时，额外注入 config.js（如果存在）用于提供私有翻译服务地址。
-            // scripts/config.js 应该由开发者在本地从 config.template.js 拷贝生成，并在 .gitignore 中忽略。
-            scriptFiles.push("scripts/config.js", "scripts/eventTracker.js", "scripts/translate.js", `scripts/${selectedType}PrimaryTranslation.js`);
+            scriptFiles = appendOperationScripts(scriptFiles, selectedOperation, selectedType);
             const textContent = document.getElementById('inputText').value;
             chrome.storage.local.set({ 'textContent': textContent }, function() {
                 chrome.scripting.executeScript({

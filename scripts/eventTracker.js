@@ -5,8 +5,25 @@ function getEventTrackURL() {
     if (window.MagicScriptConfig && window.MagicScriptConfig.EVENT_TRACK_BASE_URL) {
         return window.MagicScriptConfig.EVENT_TRACK_BASE_URL;
     }
-    // 开源仓库中的占位地址，实际使用时应在 config.js 中配置真实地址。
-    return "https://your-event-track-service.example.com/api/event";
+    // 默认不回退到占位域名，避免本地测试时产生 fetch 噪音错误。
+    return "";
+}
+
+function isValidEventTrackURL(url) {
+    if (!url || typeof url !== "string") {
+        return false;
+    }
+
+    const trimmed = url.trim();
+    if (!trimmed) {
+        return false;
+    }
+
+    if (trimmed.indexOf("your-event-track-service.example.com") > -1) {
+        return false;
+    }
+
+    return /^https?:\/\//i.test(trimmed);
 }
 
 window.EventTracker = {
@@ -58,7 +75,12 @@ window.EventTracker = {
     },
 
     uploadEvent(event) {
-        fetch(this.getServerURL(), {
+        const serverURL = this.getServerURL();
+        if (!isValidEventTrackURL(serverURL)) {
+            return;
+        }
+
+        fetch(serverURL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -70,7 +92,8 @@ window.EventTracker = {
             console.log("Event uploaded successfully");
         })
         .catch(error => {
-            console.error("Failed to upload event:", error);
+            // 埋点失败不影响核心自动化流程，避免在控制台制造误导性的红色错误。
+            console.log("[MagicScript][eventTracker] upload skipped/failed:", error && error.message ? error.message : error);
         });
     }
 };
